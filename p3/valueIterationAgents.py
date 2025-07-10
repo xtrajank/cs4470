@@ -36,6 +36,7 @@ Changes:
 """
 
 import math
+import heapq
 import mdp, util
 
 from learningAgents import ValueEstimationAgent
@@ -78,9 +79,23 @@ class ValueIterationAgent(ValueEstimationAgent):
         updating values one at a time using newly computed values.
         """
         # Write value iteration code here
-        "*** YOUR CODE HERE ***"
-    
+        for _ in range(self.iterations):
+            new_values = self.values.copy()
 
+            for state in self.mdp.getStates():
+                if self.mdp.isTerminal(state):
+                    continue
+
+                # get best value from possible actions
+                action_values = []
+                for action in self.mdp.getPossibleActions(state):
+                    q_value = self.computeQValueFromValues(state, action)
+                    action_values.append(q_value)
+
+                    if action_values:
+                        new_values[state] = max(action_values)
+
+            self.values = new_values
 
     def getValue(self, state) -> float:
         """
@@ -108,7 +123,11 @@ class ValueIterationAgent(ValueEstimationAgent):
             The Q-value for the state-action pair
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        q_value = 0
+        for next_state, prob in self.mdp.getTransitionStatesAndProbs(state, action):
+            reward = self.mdp.getReward(state, action, next_state)
+            q_value += prob * (reward + self.discount * self.values[next_state])
+        return q_value
 
     def computeActionFromValues(self, state):
         """
@@ -121,7 +140,20 @@ class ValueIterationAgent(ValueEstimationAgent):
             The optimal action, or None if state is terminal or has no legal actions
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        if self.mdp.isTerminal(state):
+            return None
+        
+        best_action = None
+        max_q_value = float('-inf')
+
+        for action in self.mdp.getPossibleActions(state):
+            q_value = self.computeQValueFromValues(state, action)
+            if q_value > max_q_value:
+                max_q_value = q_value
+                best_action = action
+        
+        return best_action
+
     def getPolicy(self, state):
         return self.computeActionFromValues(state)
 
@@ -156,7 +188,22 @@ class AsynchronousValueIterationAgent(ValueIterationAgent):
         Performs asynchronous value iteration by cycling through states and
         updating one state value at a time.
         """
-        "*** YOUR CODE HERE ***"
+        states = self.mdp.getStates()
+        num_states = len(states)
+
+        for i in range(self.iterations):
+            state = states[i % num_states] 
+
+            if self.mdp.isTerminal(state):
+                continue
+
+            best_q = float('-inf')
+            for action in self.mdp.getPossibleActions(state):
+                q_value = self.computeQValueFromValues(state, action)
+                best_q = max(best_q, q_value)
+
+            self.values[state] = best_q
+
 
 
 class PrioritizedSweepingValueIterationAgent(AsynchronousValueIterationAgent):
@@ -190,5 +237,54 @@ class PrioritizedSweepingValueIterationAgent(AsynchronousValueIterationAgent):
         Updates states in order of largest Bellman error, maintaining a priority queue
         of states to update.
         """
-        "*** YOUR CODE HERE ***"
+        states = self.mdp.getStates()
+        predecessors = dict()
+
+        for state in states:
+            predecessors[state] = set()
+
+        for state in states:
+            if self.mdp.isTerminal(state):
+                continue
+
+            for action in self.mdp.getPossibleActions(state):
+                for next_state, prob in self.mdp.getTransitionStatesAndProbs(state, action):
+                    if prob > 0:
+                        predecessors[next_state].add(state)
+
+        pq = util.PriorityQueue()
+
+        for state in states:
+            if self.mdp.isTerminal(state):
+                continue
+
+            current_value = self.values[state]
+            best_q_value = max([self.computeQValueFromValues(state, a) for a in self.mdp.getPossibleActions(state)], default=0)
+            diff = abs(current_value - best_q_value)
+            pq.update(state, -diff)
+
+        for _ in range(self.iterations):
+            if pq.isEmpty():
+                break
+
+            state = pq.pop()
+
+            if not self.mdp.isTerminal(state):
+                # Update value using Bellman backup
+                best_q_value = max([self.computeQValueFromValues(state, a)
+                                    for a in self.mdp.getPossibleActions(state)], default=0)
+                self.values[state] = best_q_value
+
+            # Update predecessors
+            for p in predecessors[state]:
+                if self.mdp.isTerminal(p):
+                    continue
+
+                current_value = self.values[p]
+                best_q_value = max([self.computeQValueFromValues(p, a)
+                                    for a in self.mdp.getPossibleActions(p)], default=0)
+                diff = abs(current_value - best_q_value)
+
+                if diff > self.theta:
+                    pq.update(p, -diff)
         
